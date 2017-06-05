@@ -25,9 +25,7 @@ import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientOptions;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
-import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetClientOptions;
-import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
 import io.vertx.core.net.SocketAddress;
 import io.vertx.core.spi.metrics.*;
@@ -74,7 +72,7 @@ public class FakeVertxMetrics extends FakeMetricsBase implements VertxMetrics {
     return new FakeHttpClientMetrics(client, options.getMetricsName());
   }
 
-  public TCPMetrics<?> createMetrics(NetServer server, SocketAddress localAddress, NetServerOptions options) {
+  public TCPMetrics<?> createMetrics(SocketAddress localAddress, NetServerOptions options) {
     return new TCPMetrics<Object>() {
 
       public Object connected(SocketAddress remoteAddress, String remoteName) {
@@ -102,7 +100,7 @@ public class FakeVertxMetrics extends FakeMetricsBase implements VertxMetrics {
     };
   }
 
-  public TCPMetrics<?> createMetrics(NetClient client, NetClientOptions options) {
+  public TCPMetrics<?> createMetrics(NetClientOptions options) {
     return new TCPMetrics<Object>() {
 
       public Object connected(SocketAddress remoteAddress, String remoteName) {

@@ -19,13 +19,21 @@
 
 package io.vertx.test.core;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http2.Http2CodecUtil;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.Http2Settings;
+import io.vertx.core.net.*;
 
+import javax.naming.ldap.LdapName;
+import javax.naming.ldap.Rdn;
+import javax.security.cert.X509Certificate;
+import java.io.ByteArrayOutputStream;
 import java.util.EnumSet;
 import java.util.Random;
 import java.util.Set;
+import java.util.zip.GZIPOutputStream;
 
 import static org.junit.Assert.fail;
 
@@ -209,12 +217,12 @@ public class TestUtils {
    * @return the random settings
    */
   public static Http2Settings randomHttp2Settings() {
-    int headerTableSize = 10 + randomPositiveInt() % (Http2CodecUtil.MAX_HEADER_TABLE_SIZE - 10);
+    long headerTableSize = 10 + randomPositiveInt() % (Http2CodecUtil.MAX_HEADER_TABLE_SIZE - 10);
     boolean enablePush = randomBoolean();
-    long maxConcurrentStreams = randomPositiveLong() % (Http2CodecUtil.MAX_CONCURRENT_STREAMS - 10);
+    long maxConcurrentStreams = 10 + randomPositiveLong() % (Http2CodecUtil.MAX_CONCURRENT_STREAMS - 10);
     int initialWindowSize = 10 + randomPositiveInt() % (Http2CodecUtil.MAX_INITIAL_WINDOW_SIZE - 10);
     int maxFrameSize = Http2CodecUtil.MAX_FRAME_SIZE_LOWER_BOUND + randomPositiveInt() % (Http2CodecUtil.MAX_FRAME_SIZE_UPPER_BOUND - Http2CodecUtil.MAX_FRAME_SIZE_LOWER_BOUND);
-    int maxHeaderListSize = 10 + randomPositiveInt() % (int) (Http2CodecUtil.MAX_HEADER_LIST_SIZE - 10);
+    long maxHeaderListSize = 10 + randomPositiveLong() % (Http2CodecUtil.MAX_HEADER_LIST_SIZE - 10);
     Http2Settings settings = new Http2Settings();
     settings.setHeaderTableSize(headerTableSize);
     settings.setPushEnabled(enablePush);
@@ -304,5 +312,79 @@ public class TestUtils {
     } catch (IndexOutOfBoundsException e) {
       // OK
     }
+  }
+  
+  /**
+   * @param source
+   * @return gzipped data
+   * @throws Exception
+   */
+  public static byte[] compressGzip(String source) throws Exception {
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    GZIPOutputStream gos = new GZIPOutputStream(baos);
+    gos.write(source.getBytes());
+    gos.close();
+    return baos.toByteArray();
+  }
+
+  public static KeyCertOptions randomKeyCertOptions() {
+    KeyCertOptions keyCertOptions;
+    switch (TestUtils.randomPositiveInt() % 3) {
+      case 0:
+        keyCertOptions = new JksOptions();
+        String jksPassword = TestUtils.randomAlphaString(100);
+        ((JksOptions) keyCertOptions).setPassword(jksPassword);
+        break;
+      case 1:
+        keyCertOptions = new PemKeyCertOptions();
+        Buffer keyValue = TestUtils.randomBuffer(100);
+        ((PemKeyCertOptions) keyCertOptions).setKeyValue(keyValue);
+        break;
+      default:
+        keyCertOptions = new PfxOptions();
+        String pfxPassword = TestUtils.randomAlphaString(100);
+        ((PfxOptions) keyCertOptions).setPassword(pfxPassword);
+    }
+    return keyCertOptions;
+  }
+
+  public static TrustOptions randomTrustOptions() {
+    TrustOptions trustOptions;
+    switch (TestUtils.randomPositiveInt() % 3) {
+      case 0:
+        trustOptions = new JksOptions();
+        String tsPassword = TestUtils.randomAlphaString(100);
+        ((JksOptions) trustOptions).setPassword(tsPassword);
+        break;
+      case 1:
+        trustOptions = new PemTrustOptions();
+        Buffer keyValue = TestUtils.randomBuffer(100);
+        ((PemTrustOptions) trustOptions).addCertValue(keyValue);
+        break;
+      default:
+        trustOptions = new PfxOptions();
+        String pfxPassword = TestUtils.randomAlphaString(100);
+        ((PfxOptions) trustOptions).setPassword(pfxPassword);
+    }
+    return trustOptions;
+  }
+
+  public static Buffer leftPad(int padding, Buffer buffer) {
+    return Buffer.buffer(Unpooled.buffer()
+        .writerIndex(padding)
+        .readerIndex(padding)
+        .writeBytes(buffer.getByteBuf())
+    );
+  }
+
+  public static String cnOf(X509Certificate cert) throws Exception {
+    String dn = cert.getSubjectDN().getName();
+    LdapName ldapDN = new LdapName(dn);
+    for (Rdn rdn : ldapDN.getRdns()) {
+      if (rdn.getType().equalsIgnoreCase("cn")) {
+        return rdn.getValue().toString();
+      }
+    }
+    return null;
   }
 }

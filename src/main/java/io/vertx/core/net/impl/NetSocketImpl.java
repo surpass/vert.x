@@ -21,6 +21,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelOutboundHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.CharsetUtil;
 import io.vertx.core.AsyncResult;
@@ -64,7 +65,7 @@ public class NetSocketImpl extends ConnectionBase implements NetSocket {
   private final SSLHelper helper;
   private final String host;
   private final int port;
-  private Object metric;
+  private final TCPMetrics metrics;
   private Handler<Buffer> dataHandler;
   private Handler<Void> endHandler;
   private Handler<Void> drainHandler;
@@ -73,29 +74,25 @@ public class NetSocketImpl extends ConnectionBase implements NetSocket {
   private ChannelFuture writeFuture;
 
   public NetSocketImpl(VertxInternal vertx, Channel channel, ContextImpl context,
-                       SSLHelper helper, TCPMetrics metrics, Object metric) {
-    this(vertx, channel, null, 0, context, helper, metrics, metric);
+                       SSLHelper helper, TCPMetrics metrics) {
+    this(vertx, channel, null, 0, context, helper, metrics);
   }
 
   public NetSocketImpl(VertxInternal vertx, Channel channel, String host, int port, ContextImpl context,
-                       SSLHelper helper, TCPMetrics metrics, Object metric) {
-    super(vertx, channel, context, metrics);
+                       SSLHelper helper, TCPMetrics metrics) {
+    super(vertx, channel, context);
     this.helper = helper;
     this.writeHandlerID = UUID.randomUUID().toString();
-    this.metric = metric;
     this.host = host;
     this.port = port;
+    this.metrics = metrics;
     Handler<Message<Buffer>> writeHandler = msg -> write(msg.body());
     registration = vertx.eventBus().<Buffer>localConsumer(writeHandlerID).handler(writeHandler);
   }
 
-  protected synchronized void setMetric(Object metric) {
-    this.metric = metric;
-  }
-
   @Override
-  protected synchronized Object metric() {
-    return metric;
+  public TCPMetrics metrics() {
+    return metrics;
   }
 
   @Override
@@ -251,17 +248,32 @@ public class NetSocketImpl extends ConnectionBase implements NetSocket {
   }
 
   @Override
-  public synchronized NetSocket upgradeToSsl(final Handler<Void> handler) {
-    SslHandler sslHandler = channel.pipeline().get(SslHandler.class);
+  public NetSocket upgradeToSsl(Handler<Void> handler) {
+    return upgradeToSsl(null, handler);
+  }
+
+  @Override
+  public NetSocket upgradeToSsl(String serverName, Handler<Void> handler) {
+    ChannelOutboundHandler sslHandler = (ChannelOutboundHandler) channel.pipeline().get("ssl");
     if (sslHandler == null) {
       if (host != null) {
-        sslHandler = helper.createSslHandler(vertx, host, port);
+        sslHandler = new SslHandler(helper.createEngine(vertx, host, port, serverName));
       } else {
-        sslHandler = helper.createSslHandler(vertx, this.remoteName(), this.remoteAddress().port());
+        if (helper.isSNI()) {
+          sslHandler = new VertxSniHandler(helper, vertx);
+        } else {
+          sslHandler = new SslHandler(helper.createEngine(vertx));
+        }
       }
       channel.pipeline().addFirst("ssl", sslHandler);
     }
-    sslHandler.handshakeFuture().addListener(future -> context.executeFromIO(() -> {
+    io.netty.util.concurrent.Future<Channel> handshakeFuture;
+    if (sslHandler instanceof SslHandler) {
+      handshakeFuture = ((SslHandler) sslHandler).handshakeFuture();
+    } else {
+      handshakeFuture = ((VertxSniHandler) sslHandler).handshakeFuture();
+    }
+    handshakeFuture.addListener(future -> context.executeFromIO(() -> {
       if (future.isSuccess()) {
         handler.handle(null);
       } else {
@@ -269,17 +281,6 @@ public class NetSocketImpl extends ConnectionBase implements NetSocket {
       }
     }));
     return this;
-  }
-
-  @Override
-  public boolean isSsl() {
-    return channel.pipeline().get(SslHandler.class) != null;
-  }
-
-
-  @Override
-  public X509Certificate[] peerCertificateChain() throws SSLPeerUnverifiedException {
-    return getPeerCertificateChain();
   }
 
   @Override
@@ -305,7 +306,7 @@ public class NetSocketImpl extends ConnectionBase implements NetSocket {
     }
   }
 
-  synchronized void handleDataReceived(Buffer data) {
+  public synchronized void handleDataReceived(Buffer data) {
     checkContext();
     if (paused) {
       if (pendingData == null) {

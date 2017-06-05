@@ -56,9 +56,11 @@
  *
  * == In the beginning there was Vert.x
  *
- * NOTE: Much of this is Java specific - need someway of swapping in language specific parts
+ * ////
+ * TODO Much of this is Java specific - need someway of swapping in language specific parts
+ * ////
  *
- * You can't do much in Vert.x-land unless you can commune with a {@link io.vertx.core.Vertx} object!
+ * You can't do much in Vert.x-land unless you can communicate with a {@link io.vertx.core.Vertx} object!
  *
  * It's the control centre of Vert.x and is how you do pretty much everything, including creating clients and servers,
  * getting a reference to the event bus, setting timers, as well as many other things.
@@ -71,8 +73,6 @@
  * ----
  * {@link examples.CoreExamples#example1}
  * ----
- *
- * If you're using Verticles
  *
  * NOTE: Most applications will only need a single Vert.x instance, but it's possible to create multiple Vert.x instances if you
  * require, for example, isolation between the event bus or different groups of servers and clients.
@@ -293,7 +293,7 @@
  *
  * A worker verticle is always executed with a thread from the worker pool.
  *
- * By default blocking code is executed on the Vert.x blocking code pool, configured with {@link io.vertx.core.VertxOptions#setWorkerPoolSize(int)}.
+ * By default blocking code is executed on the Vert.x worker pool, configured with {@link io.vertx.core.VertxOptions#setWorkerPoolSize(int)}.
  *
  * Additional pools can be created for different purposes:
  *
@@ -400,10 +400,10 @@
  *
  * 1. a file is created (`fut1`)
  * 2. something is written in the file (`fut2`)
- * 3. the file is moved (`fut3`)
+ * 3. the file is moved (`startFuture`)
  *
- * When these 3 steps are successful, the final future (`startFuture`) is completed with a success. However, if one
- * of the steps fails, the final future is completed with a failure.
+ * When these 3 steps are successful, the final future (`startFuture`) is succeeded. However, if one
+ * of the steps fails, the final future is failed.
  *
  * This example uses:
  *
@@ -1138,14 +1138,15 @@
  *
  * The redeployment process is implemented as follows. First your application is launched as a background application
  * (with the `start` command). On matching file changes, the process is stopped and the application is restarted.
- * This way avoids leaks.
+ * This avoids leaks, as the process is restarted.
  *
  * To enable the live redeploy, pass the `--redeploy` option to the `run` command. The `--redeploy` indicates the
  * set of file to _watch_. This set can use Ant-style patterns (with `\**`, `*` and `?`). You can specify
  * several sets by separating them using a comma (`,`). Patterns are relative to the current working directory.
  *
  * Parameters passed to the `run` command are passed to the application. Java Virtual Machine options can be
- * configured using `--java-opts`.
+ * configured using `--java-opts`. For instance, to pass the the `conf` parameter or a system property, you need to
+ * use: `--java-opts="-conf=my-conf.json -Dkey=value"`
  *
  * The `--launcher-class` option determine with with _main_ class the application is launcher. It's generally
  * {@link io.vertx.core.Launcher}, but you have use you own _main_.
@@ -1175,7 +1176,14 @@
  *
  * The "on-redeploy" option specifies a command invoked after the shutdown of the application and before the
  * restart. So you can hook your build tool if it updates some runtime artifacts. For instance, you can launch `gulp`
- * or `grunt` to update your resources.
+ * or `grunt` to update your resources. Don't forget that passing parameters to your application requires the
+ * `--java-opts` param:
+ *
+ * [source]
+ * ----
+ * java -jar target/my-fat-jar.jar --redeploy="**&#47;*.java" --on-redeploy="mvn package" --java-opts="-Dkey=val"
+ * java -jar build/libs/my-fat-jar.jar --redeploy="src&#47;**&#47;*.java" --on-redeploy='./gradlew shadowJar' --java-opts="-Dkey=val"
+ * ----
  *
  * The redeploy feature also supports the following settings:
  *
@@ -1259,6 +1267,59 @@
  * {@link examples.CoreExamples#example18}
  * ----
  *
+ * CAUTION: Logging backends use different formats to represent replaceable tokens in parameterized messages.
+ * As a consequence, if you rely on Vert.x parameterized logging methods, you won't be able to switch backends without changing your code.
+ *
+ * [[netty-logging]]
+ * === Netty logging
+ *
+ * When configuring logging, you should care about configuring Netty logging as well.
+ *
+ * Netty does not rely on external logging configuration (e.g system properties) and instead implements a logging
+ * configuration based on the logging libraries visible from the Netty classes:
+ *
+ * - use `SLF4J` library if it is visible
+ * - otherwise use `Log4j` if it is visible
+ * - otherwise fallback `java.util.logging`
+ *
+ * The logger implementation can be forced to a specific implementation by setting Netty's internal logger implementation directly
+ * on `io.netty.util.internal.logging.InternalLoggerFactory`:
+ *
+ * [source,java]
+ * ----
+ * // Force logging to Log4j
+ * InternalLoggerFactory.setDefaultFactory(Log4JLoggerFactory.INSTANCE);
+ * ----
+ *
+ * === Troubleshooting
+ *
+ * ==== SLF4J warning at startup
+ *
+ * If, when you start your application, you see the following message:
+ *
+ * ----
+ * SLF4J: Failed to load class "org.slf4j.impl.StaticLoggerBinder".
+ * SLF4J: Defaulting to no-operation (NOP) logger implementation
+ * SLF4J: See http://www.slf4j.org/codes.html#StaticLoggerBinder for further details.
+ * ----
+ *
+ * It means that you have SLF4J-API in your classpath but no actual binding. Messages logged with SLF4J will be dropped.
+ * You should add a binding to your classpath. Check https://www.slf4j.org/manual.html#swapping to pick a binding and configure it.
+ *
+ * Be aware that Netty looks for the SLF4-API jar and uses it by default.
+ *
+ * ==== Connection reset by peer
+ *
+ * If your logs show a bunch of:
+ *
+ * ----
+ * io.vertx.core.net.impl.ConnectionBase
+ * SEVERE: java.io.IOException: Connection reset by peer
+ * ----
+ *
+ * It means that the client is resetting the HTTP connection instead of closing it. This message also indicates that you
+ * may have not consumed the complete payload (the connection was cut before you were able to).
+ *
  * == Host name resolution
  *
  * Vert.x uses an an address resolver for resolving host name into IP addresses instead of
@@ -1282,12 +1343,39 @@
  * The default port of a DNS server is `53`, when a server uses a different port, this port can be set
  * using a colon delimiter: `192.168.0.2:40000`.
  *
- * The resolver can be configured to use an alternative _hosts_ file:
+ * NOTE: sometimes it can be desirable to use the JVM built-in resolver, the JVM system property
+ * _-Dvertx.disableDnsResolver=true_ activates this behavior
+ *
+ * === Failover
+ *
+ * When a server does not reply in a timely manner, the resolver will try the next one from the list, the search
+ * is limited by {@link io.vertx.core.dns.AddressResolverOptions#setMaxQueries(int)} (the default value is `4` queries).
+ *
+ * A DNS query is considered as failed when the resolver has not received a correct answer within
+ * {@link io.vertx.core.dns.AddressResolverOptions#getQueryTimeout()} milliseconds (the default value is `5` seconds).
+ *
+ * === Server list rotation
+ *
+ * By default the dns server selection uses the first one, the remaining servers are used for failover.
+ *
+ * You can configure {@link io.vertx.core.dns.AddressResolverOptions#setRotateServers(boolean)} to `true` to let
+ * the resolver perform a round-robin selection instead. It spreads the query load among the servers and avoids
+ * all lookup to hit the first server of the list.
+ *
+ * Failover still applies and will use the next server in the list.
+ *
+ * === Hosts mapping
+ *
+ * The _hosts_ file of the operating system is used to perform an hostname lookup for an ipaddress.
+ *
+ * An alternative _hosts_ file can be used instead:
  *
  * [source,$lang]
  * ----
  * {@link examples.CoreExamples#configureHosts}
  * ----
+ *
+ * === Search domains
  *
  * By default the resolver will use the system DNS search domains from the environment. Alternatively an explicit search domain
  * list can be provided:
@@ -1299,9 +1387,6 @@
  *
  * When a search domain list is used, the threshold for the number of dots is {@code 1} or loaded from `/etc/resolv.conf`
  * on Linux, it can be configured to a specific value with {@link io.vertx.core.dns.AddressResolverOptions#setNdots(int)}.
- *
- * NOTE: sometimes it can be desirable to use the JVM built-in resolver, the JVM system property
- * _-Dvertx.disableDnsResolver=true_ activates this behavior
  *
  * == High Availability and Fail-Over
  *
@@ -1363,7 +1448,7 @@
  *
  * [source]
  * ----
- * vertx run my-verticle.js -ha -ha-group my-group
+ * vertx run my-verticle.js -ha -hagroup my-group
  * ----
  *
  * Let's look at an example:

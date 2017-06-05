@@ -148,9 +148,10 @@ public class AsyncFileImpl implements AsyncFile {
     Handler<AsyncResult<Void>> wrapped = ar -> {
       if (ar.succeeded()) {
         checkContext();
-        checkDrained();
         if (writesOutstanding == 0 && closedDeferred != null) {
           closedDeferred.run();
+        } else {
+          checkDrained();
         }
         if (handler != null) {
           handler.handle(ar);
@@ -348,6 +349,7 @@ public class AsyncFileImpl implements AsyncFile {
   }
 
   private synchronized void handleEnd() {
+    dataHandler = null;
     if (endHandler != null) {
       checkContext();
       endHandler.handle(null);
@@ -398,7 +400,7 @@ public class AsyncFileImpl implements AsyncFile {
 
       public void failed(Throwable exc, Object attachment) {
         if (exc instanceof Exception) {
-          context.runOnContext((v) -> handler.handle(Future.succeededFuture()));
+          context.runOnContext((v) -> handler.handle(Future.failedFuture(exc)));
         } else {
           log.error("Error occurred", exc);
         }

@@ -46,9 +46,12 @@ import io.netty.handler.ssl.ApplicationProtocolNames;
 import io.netty.handler.ssl.ApplicationProtocolNegotiationHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.AsciiString;
+import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Context;
+import io.vertx.core.DeploymentOptions;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
+import io.vertx.core.Verticle;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpClientOptions;
@@ -61,7 +64,6 @@ import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.http.HttpVersion;
 import io.vertx.core.http.StreamResetException;
 import io.vertx.core.impl.VertxInternal;
-import io.vertx.core.net.JksOptions;
 import io.vertx.core.net.NetSocket;
 import io.vertx.core.net.SocketAddress;
 import io.vertx.core.net.impl.SSLHelper;
@@ -87,7 +89,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.zip.GZIPOutputStream;
 
-import static io.vertx.test.core.TestUtils.assertIllegalStateException;
+import static io.vertx.test.core.TestUtils.*;
 
 /**
  * @author <a href="mailto:julien@julienviet.com">Julien Viet</a>
@@ -110,6 +112,7 @@ public class Http2ClientTest extends Http2TestBase {
     super.setUp();
     clientOptions = new HttpClientOptions().
         setUseAlpn(true).
+        setSsl(true).
         setTrustStoreOptions(Trust.SERVER_JKS.get()).
         setProtocolVersion(HttpVersion.HTTP_2);
     client = vertx.createHttpClient(clientOptions);
@@ -161,9 +164,11 @@ public class Http2ClientTest extends Http2TestBase {
     client = vertx.createHttpClient(clientOptions.setInitialSettings(initialSettings));
     client.get(DEFAULT_HTTPS_PORT, DEFAULT_HTTPS_HOST, "/somepath", resp -> {
       complete();
-    }).connectionHandler(conn -> {
-      conn.updateSettings(updatedSettings, ar -> {
-        end.complete();
+    }).exceptionHandler(this::fail).connectionHandler(conn -> {
+      vertx.runOnContext(v -> {
+        conn.updateSettings(updatedSettings, ar -> {
+          end.complete();
+        });
       });
     }).end();
     await();
@@ -341,7 +346,7 @@ public class Http2ClientTest extends Http2TestBase {
       testComplete();
     })
         .setHost("localhost:4444")
-        .exceptionHandler(err -> fail())
+        .exceptionHandler(this::fail)
         .end();
     await();
   }
@@ -644,9 +649,7 @@ public class Http2ClientTest extends Http2TestBase {
     startServer();
     client.get(DEFAULT_HTTPS_PORT, DEFAULT_HTTPS_HOST, "/somepath", resp -> {
       testComplete();
-    }).exceptionHandler(err -> {
-      fail();
-    }).end();
+    }).exceptionHandler(this::fail).end();
     await();
   }
 
@@ -749,7 +752,7 @@ public class Http2ClientTest extends Http2TestBase {
       req.reset(10);
       assertIllegalStateException(() -> req.write(Buffer.buffer()));
       assertIllegalStateException(req::end);
-    }).setChunked(true).write(Buffer.buffer("hello"));
+    }).end(Buffer.buffer("hello"));
     await();
   }
 
@@ -896,7 +899,7 @@ public class Http2ClientTest extends Http2TestBase {
       fail();
     });
     req2.handler(resp -> {
-      assertSame(connection.get(), req1.connection());
+      assertSame(connection.get(), req2.connection());
       complete();
     });
     req1.end();
@@ -1071,7 +1074,7 @@ public class Http2ClientTest extends Http2TestBase {
       @Override
       protected void initChannel(Channel ch) throws Exception {
         SSLHelper sslHelper = new SSLHelper(serverOptions, Cert.SERVER_JKS.get(), null);
-        SslHandler sslHandler = sslHelper.setApplicationProtocols(Arrays.asList(HttpVersion.HTTP_2, HttpVersion.HTTP_1_1)).createSslHandler((VertxInternal) vertx, DEFAULT_HTTPS_HOST, DEFAULT_HTTPS_PORT);
+        SslHandler sslHandler = new SslHandler(sslHelper.setApplicationProtocols(Arrays.asList(HttpVersion.HTTP_2, HttpVersion.HTTP_1_1)).createEngine((VertxInternal) vertx, DEFAULT_HTTPS_HOST, DEFAULT_HTTPS_PORT));
         ch.pipeline().addLast(sslHandler);
         ch.pipeline().addLast(new ApplicationProtocolNegotiationHandler("whatever") {
           @Override
@@ -1120,7 +1123,7 @@ public class Http2ClientTest extends Http2TestBase {
 
   @Test
   public void testStreamError() throws Exception {
-    waitFor(2);
+    waitFor(3);
     ServerBootstrap bootstrap = createH2Server((dec, enc) -> new Http2EventAdapter() {
       @Override
       public void onHeadersRead(ChannelHandlerContext ctx, int streamId, Http2Headers headers, int streamDependency, short weight, boolean exclusive, int padding, boolean endStream) throws Http2Exception {
@@ -1144,17 +1147,20 @@ public class Http2ClientTest extends Http2TestBase {
         client.get(DEFAULT_HTTPS_PORT, DEFAULT_HTTPS_HOST, "/somepath", resp -> {
           resp.exceptionHandler(err -> {
             assertOnIOContext(ctx);
-            if (err instanceof Http2Exception.StreamException) {
+            if (err instanceof Http2Exception) {
               complete();
             }
           });
         }).connectionHandler(conn -> {
           conn.exceptionHandler(err -> {
-            fail();
+            assertOnIOContext(ctx);
+            if (err instanceof Http2Exception) {
+              complete();
+            }
           });
         }).exceptionHandler(err -> {
           assertOnIOContext(ctx);
-          if (err instanceof Http2Exception.StreamException) {
+          if (err instanceof Http2Exception) {
             complete();
           }
         }).sendHead();
@@ -1282,7 +1288,7 @@ public class Http2ClientTest extends Http2TestBase {
     server.close();
     server = vertx.createHttpServer(serverOptions.setHandle100ContinueAutomatically(true));
     server.requestHandler(req -> {
-      assertEquals(0, status.getAndIncrement());
+      status.getAndIncrement();
       HttpServerResponse resp = req.response();
       req.bodyHandler(body -> {
         assertEquals(2, status.getAndIncrement());
@@ -1303,7 +1309,7 @@ public class Http2ClientTest extends Http2TestBase {
     req.continueHandler(v -> {
       Context ctx = Vertx.currentContext();
       assertOnIOContext(ctx);
-      assertEquals(1, status.getAndIncrement());
+      status.getAndIncrement();
       req.end(Buffer.buffer("request-body"));
     });
     req.sendHead(version -> {
@@ -1366,7 +1372,7 @@ public class Http2ClientTest extends Http2TestBase {
         complete();
       });
       socket.write(Buffer.buffer("some-data"));
-    }).setHost("whatever.com").sendHead();
+    }).sendHead();
     await();
   }
 
@@ -1423,7 +1429,7 @@ public class Http2ClientTest extends Http2TestBase {
         complete();
       });
       socket.write(Buffer.buffer("some-data"));
-    }).setHost("whatever.com").sendHead();
+    }).sendHead();
     await();
   }
 
@@ -1510,7 +1516,7 @@ public class Http2ClientTest extends Http2TestBase {
     ChannelFuture s = bootstrap.bind(DEFAULT_HTTP_HOST, DEFAULT_HTTP_PORT).sync();
     try {
       client.close();
-      client = vertx.createHttpClient(clientOptions.setUseAlpn(false).setHttp2ClearTextUpgrade(upgrade));
+      client = vertx.createHttpClient(clientOptions.setUseAlpn(false).setSsl(false).setHttp2ClearTextUpgrade(upgrade));
       client.get(DEFAULT_HTTP_PORT, DEFAULT_HTTP_HOST, "/somepath", resp -> {
         assertEquals(HttpVersion.HTTP_2, resp.version());
         testComplete();
@@ -1533,7 +1539,7 @@ public class Http2ClientTest extends Http2TestBase {
       });
       startServer();
       client.close();
-      client = vertx.createHttpClient(clientOptions.setUseAlpn(false));
+      client = vertx.createHttpClient(clientOptions.setUseAlpn(false).setSsl(false));
       client.get(DEFAULT_HTTP_PORT, DEFAULT_HTTP_HOST, "/somepath", resp -> {
         assertEquals(HttpVersion.HTTP_1_1, resp.version());
         testComplete();
@@ -1574,24 +1580,26 @@ public class Http2ClientTest extends Http2TestBase {
     startServer();
     client.close();
     client = vertx.createHttpClient(clientOptions.setIdleTimeout(2));
-    HttpClientRequest req = client.get("/somepath", resp -> {
-      Context ctx = Vertx.currentContext();
-      resp.exceptionHandler(err -> {
-        assertOnIOContext(ctx);
+    Context ctx = vertx.getOrCreateContext();
+    ctx.runOnContext(v1 -> {
+      HttpClientRequest req = client.get("/somepath", resp -> {
+        resp.exceptionHandler(err -> {
+          assertSame(ctx, Vertx.currentContext());
+          assertOnIOContext(ctx);
+          complete();
+        });
+      });
+      req.exceptionHandler(err -> {
         complete();
       });
-    });
-    req.exceptionHandler(err -> {
-      complete();
-    });
-    req.connectionHandler(conn -> {
-      conn.closeHandler(v -> {
-        Context ctx = Vertx.currentContext();
-        assertOnIOContext(ctx);
-        complete();
+      req.connectionHandler(conn -> {
+        conn.closeHandler(v2 -> {
+          assertSame(ctx, Vertx.currentContext());
+          complete();
+        });
       });
+      req.sendHead();
     });
-    req.sendHead();
     await();
   }
 
@@ -1739,7 +1747,7 @@ public class Http2ClientTest extends Http2TestBase {
       }
       if (j < poolSize) {
         int threshold = j + 1;
-        waitUntil(() -> clientConnections.size() == threshold);
+        assertWaitUntil(() -> clientConnections.size() == threshold);
       }
     }
 
@@ -1817,4 +1825,37 @@ public class Http2ClientTest extends Http2TestBase {
     await();
   }
 */
+  @Test
+  public void testWorkerVerticleException() throws Exception {
+    Verticle workerVerticle = new AbstractVerticle() {
+      @Override
+      public void start() throws Exception {
+        try {
+          vertx.createHttpClient(createHttp2ClientOptions());
+          fail("HttpClient should not work with HTTP_2");
+        } catch(Exception ex) {
+          assertEquals("Cannot use HttpClient with HTTP_2 in a worker", ex.getMessage());
+          complete();
+        }
+      }
+    };
+    vertx.deployVerticle(workerVerticle, new DeploymentOptions().setWorker(true));
+    await();
+  }
+
+  @Test
+  public void testExecuteBlockingException() throws Exception {
+
+    vertx.executeBlocking(fut -> {
+      try {
+        vertx.createHttpClient(createHttp2ClientOptions());
+        fail("HttpClient should not work with HTTP_2 inside executeBlocking");
+      } catch(Exception ex) {
+        assertEquals("Cannot use HttpClient with HTTP_2 in a worker", ex.getMessage());
+        complete();
+      }
+    }, null);
+
+    await();
+  }
 }

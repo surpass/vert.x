@@ -21,6 +21,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFuture;
 import io.netty.handler.codec.http.*;
 import io.netty.handler.codec.http.HttpVersion;
+import io.vertx.codegen.annotations.Nullable;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -66,6 +67,7 @@ public class HttpServerResponseImpl implements HttpServerResponse {
   private Handler<Void> drainHandler;
   private Handler<Throwable> exceptionHandler;
   private Handler<Void> closeHandler;
+  private Handler<Void> endHandler;
   private Handler<Void> headersEndHandler;
   private Handler<Void> bodyEndHandler;
   private boolean chunked;
@@ -78,8 +80,8 @@ public class HttpServerResponseImpl implements HttpServerResponse {
   private long bytesWritten;
 
   HttpServerResponseImpl(final VertxInternal vertx, ServerConnection conn, HttpRequest request) {
-  	this.vertx = vertx;
-  	this.conn = conn;
+    this.vertx = vertx;
+    this.conn = conn;
     this.version = request.getProtocolVersion();
     this.response = new DefaultHttpResponse(version, HttpResponseStatus.OK, false);
     this.keepAlive = (version == HttpVersion.HTTP_1_1 && !request.headers().contains(io.vertx.core.http.HttpHeaders.CONNECTION, HttpHeaders.CLOSE, true))
@@ -268,6 +270,15 @@ public class HttpServerResponseImpl implements HttpServerResponse {
   }
 
   @Override
+  public HttpServerResponse endHandler(@Nullable Handler<Void> handler) {
+    synchronized (conn) {
+      checkWritten();
+      this.endHandler = handler;
+      return this;
+    }
+  }
+
+  @Override
   public HttpServerResponseImpl write(Buffer chunk) {
     ByteBuf buf = chunk.getByteBuf();
     return write(buf);
@@ -428,6 +439,9 @@ public class HttpServerResponseImpl implements HttpServerResponse {
     if (bodyEndHandler != null) {
       bodyEndHandler.handle(null);
     }
+    if (endHandler != null) {
+      endHandler.handle(null);
+    }
   }
 
   private void doSendFile(String filename, long offset, long length, Handler<AsyncResult<Void>> resultHandler) {
@@ -488,15 +502,23 @@ public class HttpServerResponseImpl implements HttpServerResponse {
 
       if (resultHandler != null) {
         ContextImpl ctx = vertx.getOrCreateContext();
-        channelFuture.addListener(future -> {
-          AsyncResult<Void> res;
-          if (future.isSuccess()) {
-            res = Future.succeededFuture();
-          } else {
-            res = Future.failedFuture(future.cause());
-          }
-          ctx.runOnContext((v) -> resultHandler.handle(res));
-        });
+        // the channel might not be available if the client has already terminated the connection
+        if (channelFuture == null) {
+          ctx.runOnContext(v -> {
+            // schedule the failure return after the doSendFile method terminates
+            resultHandler.handle(Future.failedFuture("Channel Unavailable"));
+          });
+        } else {
+          channelFuture.addListener(future -> {
+            AsyncResult<Void> res;
+            if (future.isSuccess()) {
+              res = Future.succeededFuture();
+            } else {
+              res = Future.failedFuture(future.cause());
+            }
+            ctx.runOnContext((v) -> resultHandler.handle(res));
+          });
+        }
       }
 
       if (!keepAlive) {
@@ -548,8 +570,11 @@ public class HttpServerResponseImpl implements HttpServerResponse {
 
   void handleClosed() {
     synchronized (conn) {
+      if (endHandler != null) {
+        conn.getContext().runOnContext(endHandler);
+      }
       if (closeHandler != null) {
-        closeHandler.handle(null);
+        conn.getContext().runOnContext(closeHandler);
       }
     }
   }

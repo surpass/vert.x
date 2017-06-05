@@ -33,9 +33,7 @@ import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.http.WebSocket;
 import io.vertx.core.spi.metrics.*;
-import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetClientOptions;
-import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
 import io.vertx.core.net.SocketAddress;
 
@@ -78,12 +76,12 @@ public class DummyVertxMetrics implements VertxMetrics {
   }
 
   @Override
-  public TCPMetrics createMetrics(NetServer server, SocketAddress localAddress, NetServerOptions options) {
+  public TCPMetrics createMetrics(SocketAddress localAddress, NetServerOptions options) {
     return DummyTCPMetrics.INSTANCE;
   }
 
   @Override
-  public TCPMetrics createMetrics(NetClient client, NetClientOptions options) {
+  public TCPMetrics createMetrics(NetClientOptions options) {
     return DummyTCPMetrics.INSTANCE;
   }
 

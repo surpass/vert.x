@@ -48,6 +48,7 @@ public abstract class ClientOptionsBase extends TCPSSLOptions {
   private boolean trustAll;
   private String metricsName;
   private ProxyOptions proxyOptions;
+  private String localAddress;
 
   /**
    * Default constructor
@@ -68,6 +69,7 @@ public abstract class ClientOptionsBase extends TCPSSLOptions {
     this.trustAll = other.isTrustAll();
     this.metricsName = other.metricsName;
     this.proxyOptions = other.proxyOptions != null ? new ProxyOptions(other.proxyOptions) : null;
+    this.localAddress = other.localAddress;
   }
 
   /**
@@ -81,11 +83,23 @@ public abstract class ClientOptionsBase extends TCPSSLOptions {
     ClientOptionsBaseConverter.fromJson(json, this);
   }
 
+  /**
+   * Convert to JSON
+   *
+   * @return the JSON
+   */
+  public JsonObject toJson() {
+    JsonObject json = super.toJson();
+    ClientOptionsBaseConverter.toJson(this, json);
+    return json;
+  }
+
   private void init() {
     this.connectTimeout = DEFAULT_CONNECT_TIMEOUT;
     this.trustAll = DEFAULT_TRUST_ALL;
     this.metricsName = DEFAULT_METRICS_NAME;
     this.proxyOptions = null;
+    this.localAddress = null;
   }
 
   /**
@@ -167,9 +181,138 @@ public abstract class ClientOptionsBase extends TCPSSLOptions {
     return proxyOptions;
   }
 
+  /**
+   * @return the local interface to bind for network connections.
+   */
+  public String getLocalAddress() {
+    return localAddress;
+  }
+
+  /**
+   * Set the local interface to bind for network connections. When the local address is null,
+   * it will pick any local address, the default local address is null.
+   *
+   * @param localAddress the local address
+   * @return a reference to this, so the API can be used fluently
+   */
+  public ClientOptionsBase setLocalAddress(String localAddress) {
+    this.localAddress = localAddress;
+    return this;
+  }
+
   @Override
   public ClientOptionsBase setLogActivity(boolean logEnabled) {
     return (ClientOptionsBase) super.setLogActivity(logEnabled);
+  }
+
+  @Override
+  public ClientOptionsBase setTcpNoDelay(boolean tcpNoDelay) {
+    return (ClientOptionsBase) super.setTcpNoDelay(tcpNoDelay);
+  }
+
+  @Override
+  public ClientOptionsBase setTcpKeepAlive(boolean tcpKeepAlive) {
+    return (ClientOptionsBase) super.setTcpKeepAlive(tcpKeepAlive);
+  }
+
+  @Override
+  public ClientOptionsBase setSoLinger(int soLinger) {
+    return (ClientOptionsBase) super.setSoLinger(soLinger);
+  }
+
+  @Override
+  public ClientOptionsBase setUsePooledBuffers(boolean usePooledBuffers) {
+    return (ClientOptionsBase) super.setUsePooledBuffers(usePooledBuffers);
+  }
+
+  @Override
+  public ClientOptionsBase setIdleTimeout(int idleTimeout) {
+    return (ClientOptionsBase) super.setIdleTimeout(idleTimeout);
+  }
+
+  @Override
+  public ClientOptionsBase setSsl(boolean ssl) {
+    return (ClientOptionsBase) super.setSsl(ssl);
+  }
+
+  @Override
+  public ClientOptionsBase setKeyCertOptions(KeyCertOptions options) {
+    return (ClientOptionsBase) super.setKeyCertOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setKeyStoreOptions(JksOptions options) {
+    return (ClientOptionsBase) super.setKeyStoreOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setPfxKeyCertOptions(PfxOptions options) {
+    return (ClientOptionsBase) super.setPfxKeyCertOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setPemKeyCertOptions(PemKeyCertOptions options) {
+    return (ClientOptionsBase) super.setPemKeyCertOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setTrustOptions(TrustOptions options) {
+    return (ClientOptionsBase) super.setTrustOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setTrustStoreOptions(JksOptions options) {
+    return (ClientOptionsBase) super.setTrustStoreOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setPfxTrustOptions(PfxOptions options) {
+    return (ClientOptionsBase) super.setPfxTrustOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setPemTrustOptions(PemTrustOptions options) {
+    return (ClientOptionsBase) super.setPemTrustOptions(options);
+  }
+
+  @Override
+  public ClientOptionsBase setUseAlpn(boolean useAlpn) {
+    return (ClientOptionsBase) super.setUseAlpn(useAlpn);
+  }
+
+  @Override
+  public ClientOptionsBase setSslEngineOptions(SSLEngineOptions sslEngineOptions) {
+    return (ClientOptionsBase) super.setSslEngineOptions(sslEngineOptions);
+  }
+
+  @Override
+  public ClientOptionsBase setJdkSslEngineOptions(JdkSSLEngineOptions sslEngineOptions) {
+    return (ClientOptionsBase) super.setJdkSslEngineOptions(sslEngineOptions);
+  }
+
+  @Override
+  public ClientOptionsBase setOpenSslEngineOptions(OpenSSLEngineOptions sslEngineOptions) {
+    return (ClientOptionsBase) super.setOpenSslEngineOptions(sslEngineOptions);
+  }
+
+  @Override
+  public ClientOptionsBase setSendBufferSize(int sendBufferSize) {
+    return (ClientOptionsBase) super.setSendBufferSize(sendBufferSize);
+  }
+
+  @Override
+  public ClientOptionsBase setReceiveBufferSize(int receiveBufferSize) {
+    return (ClientOptionsBase) super.setReceiveBufferSize(receiveBufferSize);
+  }
+
+  @Override
+  public ClientOptionsBase setReuseAddress(boolean reuseAddress) {
+    return (ClientOptionsBase) super.setReuseAddress(reuseAddress);
+  }
+
+  @Override
+  public ClientOptionsBase setTrafficClass(int trafficClass) {
+    return (ClientOptionsBase) super.setTrafficClass(trafficClass);
   }
 
   @Override
@@ -184,6 +327,7 @@ public abstract class ClientOptionsBase extends TCPSSLOptions {
     if (trustAll != that.trustAll) return false;
     if (!Objects.equals(metricsName, that.metricsName)) return false;
     if (!Objects.equals(proxyOptions, that.proxyOptions)) return false;
+    if (!Objects.equals(localAddress, that.localAddress)) return false;
 
     return true;
   }
@@ -195,6 +339,7 @@ public abstract class ClientOptionsBase extends TCPSSLOptions {
     result = 31 * result + (trustAll ? 1 : 0);
     result = 31 * result + (metricsName != null ? metricsName.hashCode() : 0);
     result = 31 * result + (proxyOptions != null ? proxyOptions.hashCode() : 0);
+    result = 31 * result + (localAddress != null ? localAddress.hashCode() : 0);
     return result;
   }
 }

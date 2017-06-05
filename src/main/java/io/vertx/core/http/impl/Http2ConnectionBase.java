@@ -29,7 +29,6 @@ import io.netty.handler.codec.http2.Http2FrameListener;
 import io.netty.handler.codec.http2.Http2Headers;
 import io.netty.handler.codec.http2.Http2Settings;
 import io.netty.handler.codec.http2.Http2Stream;
-import io.netty.handler.ssl.SslHandler;
 import io.netty.util.collection.IntObjectHashMap;
 import io.netty.util.collection.IntObjectMap;
 import io.vertx.codegen.annotations.Nullable;
@@ -45,7 +44,6 @@ import io.vertx.core.impl.ContextImpl;
 import io.vertx.core.impl.VertxInternal;
 import io.vertx.core.net.NetSocket;
 import io.vertx.core.net.impl.ConnectionBase;
-import io.vertx.core.spi.metrics.TCPMetrics;
 
 import java.util.ArrayDeque;
 import java.util.Map;
@@ -94,8 +92,8 @@ abstract class Http2ConnectionBase extends ConnectionBase implements Http2FrameL
   private boolean closed;
   private int windowSize;
 
-  public Http2ConnectionBase(Channel channel, ContextImpl context, VertxHttp2ConnectionHandler handler, TCPMetrics metrics) {
-    super((VertxInternal) context.owner(), channel, context, metrics);
+  public Http2ConnectionBase(Channel channel, ContextImpl context, VertxHttp2ConnectionHandler handler) {
+    super((VertxInternal) context.owner(), channel, context);
     this.channel = channel;
     this.handlerContext = channel.pipeline().context(handler);
     this.handler = handler;
@@ -118,6 +116,7 @@ abstract class Http2ConnectionBase extends ConnectionBase implements Http2FrameL
 
   @Override
   public synchronized void handleClosed() {
+    closed = true;
     super.handleClosed();
   }
 
@@ -129,10 +128,6 @@ abstract class Http2ConnectionBase extends ConnectionBase implements Http2FrameL
   @Override
   protected void handleInterestedOpsChanged() {
     // Handled by HTTP/2
-  }
-
-  boolean isSsl() {
-    return channel.pipeline().get(SslHandler.class) != null;
   }
 
   synchronized boolean isClosed() {
@@ -377,8 +372,8 @@ abstract class Http2ConnectionBase extends ConnectionBase implements Http2FrameL
     io.vertx.core.http.Http2Settings a = new io.vertx.core.http.Http2Settings();
     a.setPushEnabled(handler.connection().remote().allowPushTo());
     a.setMaxConcurrentStreams((long) handler.connection().local().maxActiveStreams());
-    a.setMaxHeaderListSize(handler.encoder().configuration().headerTable().maxHeaderListSize());
-    a.setHeaderTableSize(handler.encoder().configuration().headerTable().maxHeaderTableSize());
+    a.setMaxHeaderListSize(handler.encoder().configuration().headersConfiguration().maxHeaderListSize());
+    a.setHeaderTableSize(handler.encoder().configuration().headersConfiguration().maxHeaderTableSize());
     a.setMaxFrameSize(handler.encoder().configuration().frameSizePolicy().maxFrameSize());
     a.setInitialWindowSize(handler.encoder().flowController().initialWindowSize());
     return a;
@@ -456,6 +451,13 @@ abstract class Http2ConnectionBase extends ConnectionBase implements Http2FrameL
   @Override
   public synchronized Http2ConnectionBase exceptionHandler(Handler<Throwable> handler) {
     return (Http2ConnectionBase) super.exceptionHandler(handler);
+  }
+
+  /**
+   * @return the Netty channel - for internal usage only
+   */
+  public Channel channel() {
+    return channel;
   }
 
   // Private
